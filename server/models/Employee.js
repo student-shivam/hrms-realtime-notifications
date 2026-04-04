@@ -34,7 +34,13 @@ const employeeSchema = new mongoose.Schema({
     bonus: { type: Number, default: 0 },
     deductions: { type: Number, default: 0 }
   },
-  documents: [documentSchema]
+  documents: [documentSchema],
+  leaveBalance: {
+    sick: { type: Number, default: 12 },
+    casual: { type: Number, default: 12 },
+    paid: { type: Number, default: 15 }
+  },
+  totalLeaves: { type: Number, default: 39 }
 }, {
   timestamps: true
 });

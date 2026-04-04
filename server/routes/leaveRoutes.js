@@ -14,7 +14,7 @@ router.use(protect);
 
 router.route('/')
   .post(applyLeave)
-  .get(authorize('admin'), getAllLeaves);
+  .get(getAllLeaves);
 
 router.route('/my')
   .get(getMyLeaves);

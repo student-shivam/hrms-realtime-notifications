@@ -18,11 +18,24 @@ const leaveSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please add a reason for leave'],
   },
+  leaveType: {
+    type: String,
+    enum: ['Sick', 'Casual', 'Paid'],
+    default: 'Casual'
+  },
   status: {
     type: String,
     enum: ['Pending', 'Approved', 'Rejected'],
     default: 'Pending',
   },
+  managerComments: {
+    type: String,
+    default: ''
+  },
+  documentUrl: {
+    type: String,
+    default: ''
+  }
 }, {
   timestamps: true
 });

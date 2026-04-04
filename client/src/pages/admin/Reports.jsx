@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import api from '../../utils/api';
+import api, { API_BASE_URL, getApiErrorMessage } from '../../utils/api';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import './Admin.css';
 
@@ -38,13 +38,12 @@ const Reports = () => {
     if (filters.endDate) queryParams.append('endDate', filters.endDate);
     
     // Use window.open to trigger the attachment download directly generated from Express
-    const baseUrl = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
     const token = localStorage.getItem('token');
     
     // Standard link click bypasses Axios so we must manually append auth token if our middleware requires it via query, but wait!
     // If the endpoint is strictly protected, the browser get won't have the Authorization Header.
     // Solution 1: We can just use an authenticated fetch blob method.
-    fetch(`${baseUrl}/reports/download/${type}?${queryParams.toString()}`, {
+    fetch(`${API_BASE_URL}/reports/download/${type}?${queryParams.toString()}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -62,7 +61,7 @@ const Reports = () => {
       a.remove();
       window.URL.revokeObjectURL(url);
     }).catch(err => {
-      alert(`Error triggering ${type.toUpperCase()} download: ${err.message}`);
+      alert(`Error triggering ${type.toUpperCase()} download: ${getApiErrorMessage(err, 'Download failed')}`);
     });
   };
 

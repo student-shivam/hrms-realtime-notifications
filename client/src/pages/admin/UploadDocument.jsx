@@ -1,51 +1,133 @@
-import React, { useState, useEffect } from 'react';
-import api from '../../utils/api';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import api, { API_BASE_URL, getApiErrorMessage } from '../../utils/api';
+import '../employee/Employee.css';
+
+const documentTypeOptions = ['Aadhaar', 'Resume', 'Certificate', 'Other'];
+
+const getFileIcon = (mimeType) => {
+  if (mimeType?.includes('pdf')) return 'PDF';
+  if (mimeType?.includes('image')) return 'IMG';
+  return 'DOC';
+};
 
 const UploadDocument = () => {
+  const fileInputRef = useRef(null);
   const [employees, setEmployees] = useState([]);
   const [selectedEmp, setSelectedEmp] = useState('');
-  const [docName, setDocName] = useState('');
-  const [file, setFile] = useState(null);
-  const [status, setStatus] = useState('');
-  const [empDocs, setEmpDocs] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [dragActive, setDragActive] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [documentType, setDocumentType] = useState('Aadhaar');
+  const [displayName, setDisplayName] = useState('');
+  const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
+
+  const selectedEmployee = useMemo(
+    () => employees.find((employee) => employee._id === selectedEmp) || null,
+    [employees, selectedEmp]
+  );
 
   useEffect(() => {
-    api.get('/employees').then(res => setEmployees(res.data.data));
+    api.get('/employees')
+      .then((res) => setEmployees(res.data.data))
+      .catch((error) => setStatusMsg({ type: 'error', text: getApiErrorMessage(error, 'Failed to load employees') }));
   }, []);
 
   useEffect(() => {
-    if (selectedEmp) {
-      const target = employees.find(e => e._id === selectedEmp);
-      if (target) {
-        setEmpDocs(target.documents || []);
-      }
-    } else {
-      setEmpDocs([]);
+    if (!selectedEmp) {
+      setDocuments([]);
+      return;
     }
-  }, [selectedEmp, employees]);
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!selectedEmp || !file) return setStatus('Select employee and file.');
-    
+    setLoading(true);
+    api.get(`/documents/${selectedEmp}`)
+      .then((res) => setDocuments(res.data.data))
+      .catch((error) => setStatusMsg({ type: 'error', text: getApiErrorMessage(error, 'Failed to load employee documents') }))
+      .finally(() => setLoading(false));
+  }, [selectedEmp]);
+
+  const setFileState = (file) => {
+    if (!file) return;
+    setSelectedFile(file);
+    if (!displayName) {
+      setDisplayName(file.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  const handleUpload = async (event) => {
+    event.preventDefault();
+    if (!selectedEmp || !selectedFile) {
+      setStatusMsg({ type: 'error', text: 'Select an employee and a file first.' });
+      return;
+    }
+
     const formData = new FormData();
-    formData.append('document', file);
-    formData.append('name', docName);
+    formData.append('employeeId', selectedEmp);
+    formData.append('file', selectedFile);
+    formData.append('documentType', documentType);
+    formData.append('displayName', displayName || selectedFile.name.replace(/\.[^/.]+$/, ''));
+
+    setUploading(true);
+    setUploadProgress(0);
+    setStatusMsg({ type: '', text: '' });
 
     try {
-      setStatus('Uploading...');
-      const response = await api.post(`/employees/${selectedEmp}/documents`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const res = await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (!progressEvent.total) return;
+          setUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
+        }
       });
-      setStatus('Document successfully uploaded!');
-      setEmpDocs(response.data.data);
-      setDocName('');
-      setFile(null);
-      
-      setEmployees(employees.map(emp => emp._id === selectedEmp ? {...emp, documents: response.data.data} : emp));
-      
-    } catch (err) {
-      setStatus(err.response?.data?.message || 'Upload failed');
+
+      setDocuments((prev) => [res.data.data, ...prev]);
+      setSelectedFile(null);
+      setDisplayName('');
+      setDocumentType('Aadhaar');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setStatusMsg({ type: 'success', text: 'Document uploaded successfully.' });
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: getApiErrorMessage(error, 'Upload failed') });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleProtectedOpen = async (endpoint, downloadName) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL.replace(/\/api$/, '')}${endpoint}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Unable to open document');
+
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      if (downloadName) {
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = downloadName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } else {
+        window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      }
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 4000);
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: getApiErrorMessage(error, 'Unable to access document') });
+    }
+  };
+
+  const handleDelete = async (documentId) => {
+    try {
+      await api.delete(`/documents/${documentId}`);
+      setDocuments((prev) => prev.filter((item) => item._id !== documentId));
+      setStatusMsg({ type: 'success', text: 'Document deleted successfully.' });
+    } catch (error) {
+      setStatusMsg({ type: 'error', text: getApiErrorMessage(error, 'Failed to delete document') });
     }
   };
 
@@ -54,64 +136,136 @@ const UploadDocument = () => {
       <div className="dashboard-header" style={{ marginBottom: '1.5rem' }}>
         <div>
           <h1 className="dashboard-title">Document Management</h1>
-          <p className="dashboard-subtitle">Securely transfer official PDF or Image transcripts targeting exact employee files.</p>
+          <p className="dashboard-subtitle">Manage employee documents securely with controlled access and protected downloads.</p>
         </div>
       </div>
 
-      <div className="dashboard-bottom-grid">
-        <div className="glass-panel p-6 animate-fade-in">
-          <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', fontFamily: 'var(--font-heading)' }}>Upload New File</h2>
-          <form onSubmit={handleUpload} className="flex flex-col gap-4">
+      <div className="document-vault-layout">
+        <div className="glass-panel p-6 document-upload-panel">
+          <h3 style={{ marginBottom: '1.25rem' }}>Upload for Employee</h3>
+          <form onSubmit={handleUpload}>
             <div className="form-group">
-              <label>Select Target Employee</label>
+              <label>Select Employee</label>
               <select required value={selectedEmp} onChange={(e) => setSelectedEmp(e.target.value)}>
-                <option value="">-- Choose Employee Account --</option>
-                {employees.map(emp => (
-                  <option key={emp._id} value={emp._id}>{emp.name} ({emp.department})</option>
+                <option value="">-- Choose Employee --</option>
+                {employees.map((employee) => (
+                  <option key={employee._id} value={employee._id}>{employee.name} ({employee.email})</option>
                 ))}
               </select>
             </div>
+
             <div className="form-group">
-              <label>Document Name (e.g. Offer Letter, W-2)</label>
-              <input type="text" required value={docName} onChange={e => setDocName(e.target.value)} placeholder="Signed Contract" />
+              <label>Document Type</label>
+              <select value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
+                {documentTypeOptions.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
             </div>
+
             <div className="form-group">
-              <label>Official File (PDF/PNG/JPG limit 10MB)</label>
-              <input type="file" required accept=".pdf, .png, .jpg, .jpeg" onChange={e => setFile(e.target.files[0])} />
+              <label>Rename File</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Enter document display name"
+              />
             </div>
-            <button type="submit" className="btn btn-primary mt-4 w-full shadow-hover">Upload to Encrypted Vault</button>
-            {status && <div style={{ padding: '0.8rem', marginTop: '1rem', background: 'var(--bg-highlight)', borderRadius: '8px', textAlign: 'center', color: 'var(--primary)' }}>{status}</div>}
+
+            <div
+              className={`document-drop-zone ${dragActive ? 'active' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragActive(false);
+                setFileState(e.dataTransfer.files?.[0]);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="document-drop-icon">{selectedFile ? getFileIcon(selectedFile.type) : 'UP'}</div>
+              <strong>{selectedFile ? selectedFile.name : 'Drag & drop a file here'}</strong>
+              <span>PDF, JPG, PNG only • max 5MB</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                style={{ display: 'none' }}
+                onChange={(e) => setFileState(e.target.files?.[0])}
+              />
+            </div>
+
+            {uploading && (
+              <div className="document-progress-wrap">
+                <div className="document-progress-bar" style={{ width: `${uploadProgress}%` }} />
+                <span>{uploadProgress}% uploaded</span>
+              </div>
+            )}
+
+            {statusMsg.text && (
+              <div className={`status-msg ${statusMsg.type}`} style={{ marginTop: '1rem' }}>
+                {statusMsg.text}
+              </div>
+            )}
+
+            <button type="submit" className="btn btn-primary mt-4 w-full shadow-hover" disabled={uploading}>
+              {uploading ? 'Uploading...' : 'Upload Document'}
+            </button>
           </form>
         </div>
 
-        <div className="glass-panel p-6 animate-fade-in" style={{ display: 'flex', flexDirection: 'column' }}>
-           <h2 style={{ fontSize: '1.25rem', marginBottom: '1.5rem', fontFamily: 'var(--font-heading)' }}>Current Employee Registry</h2>
-           
-           {!selectedEmp ? (
-              <div className="flex-center" style={{ flexGrow: 1 }}>
-                 <p className="text-muted text-center">Select an employee from the left panel to securely resolve their Document allocations.</p>
-              </div>
-           ) : empDocs.length === 0 ? (
-              <div className="flex-center" style={{ flexGrow: 1 }}>
-                 <p className="text-muted text-center" style={{ maxWidth: '80%' }}>No prior documentation tracking records detected actively assigned against this selected network node.</p>
-              </div>
-           ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', maxHeight: '450px', paddingRight: '0.5rem' }}>
-                {empDocs.map((doc, idx) => (
-                  <div key={idx} style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', borderLeft: '3px solid var(--primary)', borderRadius: '6px' }}>
-                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '1.1rem', color: 'white' }}>{doc.name}</h4>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Uploaded: {new Date(doc.uploadedAt || Date.now()).toLocaleDateString()}</span>
-                        </div>
-                        <a href={`${import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5000'}${doc.url}`} target="_blank" rel="noreferrer" className="badge badge-success" style={{ textDecoration: 'none' }}>
-                          Download File
-                        </a>
-                     </div>
+        <div className="glass-panel p-6">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', gap: '1rem', flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Employee Documents</h3>
+              <p className="text-muted" style={{ margin: '0.35rem 0 0' }}>
+                {selectedEmployee ? `${selectedEmployee.name} • ${documents.length} file(s)` : 'Select an employee to view their vault'}
+              </p>
+            </div>
+          </div>
+
+          {!selectedEmp ? (
+            <div className="text-center py-10 text-muted">Choose an employee to view and manage their secure documents.</div>
+          ) : loading ? (
+            <div className="text-center py-10"><div className="spinner"></div></div>
+          ) : documents.length === 0 ? (
+            <div className="text-center py-10 text-muted">No documents found for this employee.</div>
+          ) : (
+            <div className="document-grid">
+              {documents.map((document) => (
+                <div key={document._id} className="document-card">
+                  <div className="document-card-top">
+                    <div className="document-icon">{getFileIcon(document.mimeType)}</div>
+                    <span className={`badge ${document.status === 'Verified' ? 'badge-success' : document.status === 'Rejected' ? 'badge-danger' : 'badge-warning'}`}>
+                      {document.status}
+                    </span>
                   </div>
-                ))}
-              </div>
-           )}
+                  <h4>{document.displayName}</h4>
+                  <p>{document.documentType}</p>
+                  <div className="document-meta">
+                    <span>{document.originalName}</span>
+                    <span>{new Date(document.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <div className="document-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleProtectedOpen(document.previewUrl)}>
+                      Preview
+                    </button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => handleProtectedOpen(document.downloadUrl, document.originalName)}>
+                      Download
+                    </button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleDelete(document._id)}>
+                      Delete
+                    </button>
+                  </div>
+                  <div className="document-meta" style={{ marginTop: '0.8rem' }}>
+                    <span>Uploaded by {document.uploadedByRole}</span>
+                    <span>{(document.fileSize / 1024 / 1024).toFixed(2)} MB</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

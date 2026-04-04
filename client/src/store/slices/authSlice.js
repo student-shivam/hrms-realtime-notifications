@@ -9,16 +9,14 @@ const initialState = {
   token: token || null,
   loading: false,
   error: null,
+  successMessage: null,
 };
 
-// Async thunks
 export const registerUser = createAsyncThunk(
   'auth/register',
   async (userData, thunkAPI) => {
     try {
       const response = await api.post('/auth/register', userData);
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
       return response.data;
     } catch (error) {
       return thunkAPI.rejectWithValue(error.response?.data?.message || 'Registration failed');
@@ -47,7 +45,7 @@ export const updateProfile = createAsyncThunk(
       const response = await api.put('/auth/profile', profileData, {
          headers: { 'Content-Type': 'multipart/form-data' }
       });
-      localStorage.setItem('user', JSON.stringify(response.data.data)); // The user subset
+      localStorage.setItem('user', JSON.stringify(response.data.data));
       return response.data.data;
     } catch (error) {
       return thunkAPI.rejectWithValue(error.response?.data?.message || 'Profile update failed');
@@ -59,6 +57,12 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
+    setUser: (state, action) => {
+      state.user = action.payload;
+      if (action.payload) {
+        localStorage.setItem('user', JSON.stringify(action.payload));
+      }
+    },
     logout: (state) => {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -67,28 +71,30 @@ const authSlice = createSlice({
     },
     clearError: (state) => {
       state.error = null;
+    },
+    clearSuccessMessage: (state) => {
+      state.successMessage = null;
     }
   },
   extraReducers: (builder) => {
     builder
-      // Register
       .addCase(registerUser.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.successMessage = null;
       })
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.token = action.payload.token;
+        state.successMessage = action.payload.message;
       })
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
-      // Login
       .addCase(loginUser.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.successMessage = null;
       })
       .addCase(loginUser.fulfilled, (state, action) => {
         state.loading = false;
@@ -99,7 +105,6 @@ const authSlice = createSlice({
         state.loading = false;
         state.error = action.payload;
       })
-      // Update Profile
       .addCase(updateProfile.pending, (state) => {
          state.loading = true;
          state.error = null;
@@ -115,5 +120,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { logout, clearError } = authSlice.actions;
+export const { setUser, logout, clearError, clearSuccessMessage } = authSlice.actions;
 export default authSlice.reducer;

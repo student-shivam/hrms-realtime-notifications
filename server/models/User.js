@@ -1,6 +1,32 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const experienceSchema = new mongoose.Schema({
+  company: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  role: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  startDate: {
+    type: Date,
+    required: true,
+  },
+  endDate: {
+    type: Date,
+    default: null,
+  },
+  description: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+}, { _id: true });
+
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -26,10 +52,74 @@ const userSchema = new mongoose.Schema({
     enum: ['employee', 'admin'],
     default: 'employee',
   },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending',
+  },
+  isApproved: {
+    type: Boolean,
+    default: false,
+  },
   avatar: {
     type: String,
     default: 'default-avatar.png'
   },
+  profileImage: {
+    type: String,
+    default: '',
+  },
+  designation: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  department: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  phone: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  bio: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: 1000,
+  },
+  skills: [{
+    type: String,
+    trim: true,
+  }],
+  experience: [experienceSchema],
+  performance: {
+    rating: {
+      type: Number,
+      min: 0,
+      max: 5,
+      default: 0,
+    },
+    attendancePercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
+    taskCompletion: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
+    notes: {
+      type: String,
+      default: '',
+      trim: true,
+    }
+  }
 }, {
   timestamps: true
 });

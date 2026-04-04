@@ -6,7 +6,8 @@ const {
   deleteEmployee,
   uploadDocument,
   getMyDocuments,
-  getMyProfile
+  getMyProfile,
+  getMySalarySlip
 } = require('../controllers/employeeController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const uploadDoc = require('../middleware/uploadDoc');
@@ -19,6 +20,7 @@ router.use(protect);
 // Employee specific route
 router.get('/my/profile', getMyProfile);
 router.get('/my/documents', getMyDocuments);
+router.get('/my/salary-slip', getMySalarySlip);
 
 // Admin / Core Employee management routes
 router.route('/')

@@ -1,10 +1,11 @@
 const express = require('express');
+const http = require('http');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const path = require('path');
+const { Server } = require('socket.io');
 
-// Route files
 const authRoutes = require('./routes/authRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const leaveRoutes = require('./routes/leaveRoutes');
@@ -13,33 +14,51 @@ const taskRoutes = require('./routes/taskRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const documentRoutes = require('./routes/documentRoutes');
 const reportRoutes = require('./routes/reportRoutes');
+const salaryRoutes = require('./routes/salaryRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const calendarRoutes = require('./routes/calendarRoutes');
+const holidayRoutes = require('./routes/holidayRoutes');
+const profileRoutes = require('./routes/profileRoutes');
+const Message = require('./models/Message');
+const ChatGroup = require('./models/ChatGroup');
 
-// Load environment variables resolving paths explicitly to server directory avoiding execution CWD failures
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const server = http.createServer(app);
+const PORT = Number(process.env.PORT) || 5001;
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    credentials: true
+  },
+  transports: ['websocket', 'polling']
+});
 
-// Middleware
-app.use(cors());
+app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
-
-// Serve static files (uploads)
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  console.log(`[HTTP] ${req.method} ${req.originalUrl}`);
+  res.on('finish', () => {
+    console.log(`[HTTP] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt}ms)`);
+  });
+  next();
+});
 
-// MongoDB Connection
-console.log('Attempting to securely connect to MongoDB Atlas cluster...');
 mongoose.connect(process.env.MONGO_URI, {
-  serverSelectionTimeoutMS: 5000 // Avoids infinite silent hangs
+  serverSelectionTimeoutMS: 5000
 })
   .then(() => {
     console.log('MongoDB connection established successfully');
   })
   .catch((error) => {
-    console.error('CRITICAL ERROR connecting to MongoDB! Make sure your IP is explicitly whitelisted inside your MongoDB Atlas Network Access Panel:', error.message);
+    console.error('MongoDB connection error:', error.message);
   });
 
-// Test API Route
 app.get('/api/test', (req, res) => {
   res.status(200).json({
     success: true,
@@ -47,11 +66,16 @@ app.get('/api/test', (req, res) => {
   });
 });
 
-// Notification Route
-const notificationRoutes = require('./routes/notificationRoutes');
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    port: PORT,
+    mongoState: mongoose.connection.readyState
+  });
+});
 
-// Mount routers
 app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/attendance', attendanceRoutes);
@@ -60,47 +84,252 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/salary', salaryRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/messages', chatRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/holidays', holidayRoutes);
 
-// Socket.io Setup
-const http = require('http');
-const { Server } = require('socket.io');
-
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: '*', // Allow all for dev, restrict in production
-    methods: ['GET', 'POST']
-  }
-});
-
-// Store active users: userId -> socketId
 const userSockets = new Map();
+const onlineUsers = new Set();
 
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  socket.on('register', (userId) => {
-    userSockets.set(userId, socket.id);
-    console.log(`User ${userId} registered with socket ${socket.id}`);
+  socket.on('register', async (payload) => {
+    try {
+      const userId = typeof payload === 'string' ? payload : payload?.userId;
+      const role = typeof payload === 'string' ? null : payload?.role;
+
+      if (!userId) {
+        return;
+      }
+
+      userSockets.set(String(userId), socket.id);
+      onlineUsers.add(String(userId));
+      socket.data.userId = String(userId);
+      socket.join(`user:${userId}`);
+
+      if (role === 'admin') {
+        socket.join('admins');
+      }
+
+      const groups = await ChatGroup.find({ members: userId }).select('_id').lean();
+      groups.forEach((group) => {
+        socket.join(`group:${group._id}`);
+      });
+
+      console.log(`User ${userId} registered with socket ${socket.id}`);
+      io.emit('userOnline', { userId: String(userId), onlineUsers: Array.from(onlineUsers) });
+    } catch (error) {
+      console.error('Socket register error:', error.message);
+    }
   });
 
-  socket.on('disconnect', () => {
-    // Remove the disconnected socket
-    for (let [userId, socketId] of userSockets.entries()) {
+  socket.on('sendMessage', async (payload) => {
+    try {
+      const senderId = String(payload?.senderId || '');
+      const receiverId = payload?.receiverId ? String(payload.receiverId) : '';
+      const groupId = payload?.groupId ? String(payload.groupId) : '';
+      const messageText = String(payload?.messageText || payload?.message || '').trim();
+
+      if (!senderId || (!receiverId && !groupId) || !messageText) {
+        return;
+      }
+
+      const delivered = groupId || onlineUsers.has(receiverId);
+      const message = await Message.create({
+        senderId,
+        receiverId: receiverId || null,
+        groupId: groupId || null,
+        messageText,
+        messageType: 'text',
+        delivered: Boolean(delivered),
+        seenBy: [senderId]
+      });
+
+      const normalized = {
+        _id: String(message._id),
+        senderId,
+        receiverId: receiverId || null,
+        groupId: groupId || null,
+        messageText,
+        messageType: 'text',
+        delivered: Boolean(delivered),
+        seenBy: [senderId],
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+        timestamp: message.createdAt,
+        edited: false,
+        deletedForEveryone: false,
+        status: delivered ? 'delivered' : 'sent'
+      };
+
+      if (groupId) {
+        io.to(`group:${groupId}`).emit('receiveMessage', normalized);
+      } else {
+        io.to(`user:${receiverId}`).emit('receiveMessage', normalized);
+        io.to(`user:${senderId}`).emit('messageStatusUpdated', {
+          messageId: normalized._id,
+          status: normalized.status,
+          conversationId: `direct:${[senderId, receiverId].sort().join(':')}`
+        });
+      }
+    } catch (error) {
+      console.error('Socket sendMessage error:', error.message);
+    }
+  });
+
+  socket.on('typing', (payload) => {
+    try {
+      const targetType = String(payload?.targetType || 'direct');
+      const targetId = String(payload?.targetId || '');
+      if (!targetId) {
+        return;
+      }
+
+      const typingPayload = {
+        fromUserId: String(payload?.fromUserId || ''),
+        targetType,
+        targetId,
+        isTyping: Boolean(payload?.isTyping)
+      };
+
+      if (targetType === 'group') {
+        socket.to(`group:${targetId}`).emit('typing', typingPayload);
+      } else {
+        io.to(`user:${targetId}`).emit('typing', typingPayload);
+      }
+    } catch (error) {
+      console.error('Socket typing error:', error.message);
+    }
+  });
+
+  socket.on('stopTyping', (payload) => {
+    try {
+      const targetType = String(payload?.targetType || 'direct');
+      const targetId = String(payload?.targetId || '');
+      if (!targetId) {
+        return;
+      }
+
+      const typingPayload = {
+        fromUserId: String(payload?.fromUserId || ''),
+        targetType,
+        targetId,
+        isTyping: false
+      };
+
+      if (targetType === 'group') {
+        socket.to(`group:${targetId}`).emit('typing', typingPayload);
+      } else {
+        io.to(`user:${targetId}`).emit('typing', typingPayload);
+      }
+    } catch (error) {
+      console.error('Socket stopTyping error:', error.message);
+    }
+  });
+
+  socket.on('messageSeen', async (payload) => {
+    try {
+      const byUserId = String(payload?.byUserId || '');
+      const targetType = String(payload?.targetType || 'direct');
+      const targetId = String(payload?.targetId || '');
+      if (!byUserId || !targetId) {
+        return;
+      }
+
+      let query = {};
+      let room = '';
+
+      if (targetType === 'group') {
+        query = {
+          groupId: targetId,
+          senderId: { $ne: byUserId },
+          seenBy: { $ne: byUserId }
+        };
+        room = `group:${targetId}`;
+      } else {
+        query = {
+          groupId: null,
+          senderId: targetId,
+          receiverId: byUserId,
+          seenBy: { $ne: byUserId }
+        };
+        room = `user:${targetId}`;
+      }
+
+      const messages = await Message.find(query).select('_id');
+      if (!messages.length) return;
+
+      await Message.updateMany(
+        { _id: { $in: messages.map((item) => item._id) } },
+        { $addToSet: { seenBy: byUserId }, $set: { delivered: true } }
+      );
+
+      io.to(room).emit('messageSeen', {
+        byUserId,
+        targetType,
+        targetId,
+        messageIds: messages.map((item) => String(item._id))
+      });
+    } catch (error) {
+      console.error('Socket messageSeen error:', error.message);
+    }
+  });
+
+  socket.on('error', (error) => {
+    console.error(`Socket error (${socket.id}):`, error.message);
+  });
+
+  socket.on('disconnect', (reason) => {
+    for (const [userId, socketId] of userSockets.entries()) {
       if (socketId === socket.id) {
         userSockets.delete(userId);
-        console.log(`User ${userId} disconnected`);
+        onlineUsers.delete(userId);
+        io.emit('userOffline', { userId, onlineUsers: Array.from(onlineUsers) });
+        console.log(`User ${userId} disconnected (${reason})`);
         break;
       }
     }
   });
 });
 
-// Make io accessible to our router/controllers
 app.set('io', io);
 app.set('userSockets', userSockets);
+app.set('onlineUsers', onlineUsers);
 
-// Start Server
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.originalUrl}`
+  });
+});
+
+app.use((error, req, res, next) => {
+  console.error(`[ERROR] ${req.method} ${req.originalUrl}:`, error);
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  res.status(error.statusCode || 500).json({
+    success: false,
+    message: error.message || 'Internal server error'
+  });
+});
+
+server.on('error', (error) => {
+  console.error('HTTP server error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
 server.listen(PORT, () => {
   console.log(`Server is running with Socket.io on port: ${PORT}`);
 });

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { registerUser, clearError } from '../store/slices/authSlice';
+import { registerUser, clearError, clearSuccessMessage } from '../store/slices/authSlice';
 import './Auth.css';
 
 const Signup = () => {
@@ -9,11 +9,12 @@ const Signup = () => {
     name: '', email: '', password: '', role: 'employee'
   });
   const dispatch = useDispatch();
-  const { loading, error } = useSelector((state) => state.auth);
+  const { loading, error, successMessage } = useSelector((state) => state.auth);
   const navigate = useNavigate();
 
   useEffect(() => {
     dispatch(clearError());
+    dispatch(clearSuccessMessage());
   }, [dispatch]);
 
   const handleChange = (e) => {
@@ -25,11 +26,10 @@ const Signup = () => {
     const resultAction = await dispatch(registerUser(formData));
     
     if (registerUser.fulfilled.match(resultAction)) {
-      if (resultAction.payload.user.role === 'admin') {
-        navigate('/admin');
-      } else {
-        navigate('/employee');
-      }
+      setFormData({
+        name: '', email: '', password: '', role: 'employee'
+      });
+      setTimeout(() => navigate('/login'), 1200);
     }
   };
 
@@ -40,6 +40,7 @@ const Signup = () => {
         <p className="auth-subtitle">Join the HRMS platform</p>
         
         {error && <div className="auth-error">{error}</div>}
+        {successMessage && <div className="status-msg success" style={{ marginBottom: '1rem' }}>{successMessage}</div>}
 
         <form onSubmit={handleSubmit} className="auth-form flex flex-col gap-4">
           <div className="form-group">

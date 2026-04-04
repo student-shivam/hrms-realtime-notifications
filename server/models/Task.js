@@ -19,6 +19,12 @@ const taskSchema = new mongoose.Schema({
     enum: ['Pending', 'In Progress', 'Completed'],
     default: 'Pending',
   },
+  deadline: {
+    type: Date,
+  },
+  fileUrl: {
+    type: String,
+  }
 }, {
   timestamps: true
 });

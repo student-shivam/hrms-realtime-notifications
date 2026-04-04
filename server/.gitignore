@@ -1,0 +1,65 @@
+# ======================
+# Node Modules
+# ======================
+node_modules/
+server/node_modules/
+client/node_modules/
+
+# ======================
+# Environment Files
+# ======================
+.env
+server/.env
+client/.env
+
+# ======================
+# Logs
+# ======================
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ======================
+# Build Folders
+# ======================
+build/
+dist/
+client/build/
+
+# ======================
+# Uploads (optional - if not needed in repo)
+# ======================
+server/uploads/
+
+# ======================
+# OS Files
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# Editor Files
+# ======================
+.vscode/
+.idea/
+
+# ======================
+# Cache / Temp
+# ======================
+.cache/
+tmp/
+temp/
+
+# ======================
+# Coverage
+# ======================
+coverage/
+
+# ======================
+# Misc
+# ======================
+*.pid
+*.seed
+*.pid.lock

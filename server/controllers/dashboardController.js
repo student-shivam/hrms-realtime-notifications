@@ -1,54 +1,28 @@
-const Employee = require('../models/Employee');
-const Leave = require('../models/Leave');
 const Task = require('../models/Task');
 const Attendance = require('../models/Attendance');
+const Leave = require('../models/Leave');
+const Employee = require('../models/Employee');
+const Notification = require('../models/Notification');
+const { fetchDashboardStats } = require('../utils/dashboardStats');
 
 // @desc    Get admin dashboard stats
-// @route   GET /api/dashboard/admin
+// @route   GET /api/dashboard/stats
 // @access  Private (Admin only)
-exports.getAdminDashboard = async (req, res) => {
+exports.getDashboardStats = async (req, res) => {
   try {
-    const totalEmployees = await Employee.countDocuments();
-    const pendingLeaves = await Leave.countDocuments({ status: 'Pending' });
-    const totalLeaves = await Leave.countDocuments();
-    const pendingTasks = await Task.countDocuments({ status: 'Pending' });
-
-    // Employee by department
-    const employeesDept = await Employee.aggregate([
-      { $group: { _id: "$department", count: { $sum: 1 } } }
-    ]);
-    const departmentData = employeesDept.map(d => ({ name: d._id, value: d.count }));
-
-    // Leaves by status
-    const leavesStats = await Leave.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } }
-    ]);
-    const leaveData = leavesStats.map(l => ({ name: l._id, value: l.count }));
-
-    // Attendance stats
-    const attendanceStats = await Attendance.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } }
-    ]);
-    const attendanceData = attendanceStats.map(a => ({ name: a._id, value: a.count }));
+    const stats = await fetchDashboardStats();
 
     res.status(200).json({
       success: true,
-      data: {
-        totalEmployees,
-        pendingLeaves,
-        totalLeaves,
-        pendingTasks,
-        chartData: {
-          departmentData,
-          leaveData,
-          attendanceData
-        }
-      }
+      data: stats
     });
   } catch (error) {
+    console.error('getDashboardStats error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+exports.getAdminDashboard = exports.getDashboardStats;
 
 // @desc    Get employee dashboard stats
 // @route   GET /api/dashboard/employee
@@ -75,12 +49,45 @@ exports.getEmployeeDashboard = async (req, res) => {
     const approvedLeaves = await Leave.countDocuments({ userId, status: 'Approved' });
     const pendingLeaves = await Leave.countDocuments({ userId, status: 'Pending' });
 
+    // Fetch Employee record for salary and leave balance
+    const employee = await Employee.findOne({ email: req.user.email });
+    
+    const recentNotifications = await Notification.find({ recipient: userId })
+      .sort('-createdAt')
+      .limit(5);
+
+    // Calculate today's working hours if checked in
+    let todayWorkingHours = 0;
+    if (existingAttendance && existingAttendance.checkIn) {
+      if (existingAttendance.checkOut) {
+        todayWorkingHours = existingAttendance.workingHours;
+      } else {
+        const diff = new Date() - new Date(existingAttendance.checkIn);
+        todayWorkingHours = parseFloat((diff / (1000 * 60 * 60)).toFixed(2));
+      }
+    }
+
     res.status(200).json({
       success: true,
       data: {
-        attendance: { daysPresent, daysAbsent, isAttendanceMarkedToday },
+        attendance: { 
+          daysPresent, 
+          daysAbsent, 
+          isAttendanceMarkedToday, 
+          todayWorkingHours,
+          todayStatus: existingAttendance ? existingAttendance.status : 'Absent'
+        },
         tasks: { pendingTasks, completedTasks },
-        leaves: { approvedLeaves, pendingLeaves }
+        leaves: { 
+          approvedLeaves, 
+          pendingLeaves,
+          balance: employee ? employee.leaveBalance : { sick: 0, casual: 0, paid: 0 }
+        },
+        salary: employee ? {
+          base: employee.salary,
+          details: employee.salaryDetails
+        } : null,
+        notifications: recentNotifications
       }
     });
   } catch (error) {

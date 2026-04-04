@@ -145,8 +145,17 @@ exports.downloadPDF = async (req, res) => {
     await browser.close();
 
     res.download(filePath, 'Analytical_Report.pdf', (err) => {
-      if (err) console.error(err);
-      fs.unlinkSync(filePath); // Cleanup
+      if (err) {
+        console.error('downloadPDF error:', err);
+      }
+
+      if (fs.existsSync(filePath)) {
+        fs.unlink(filePath, (unlinkError) => {
+          if (unlinkError) {
+            console.error('downloadPDF cleanup error:', unlinkError);
+          }
+        });
+      }
     });
 
   } catch (error) {

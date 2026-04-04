@@ -1,26 +1,30 @@
 const Task = require('../models/Task');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
+const mongoose = require('mongoose');
 
 // @desc    Assign a new task
 // @route   POST /api/tasks
 // @access  Private (Admin only)
 exports.assignTask = async (req, res) => {
   try {
-    const { title, description, assignedTo } = req.body;
+    const { title, description, assignedTo, deadline, fileUrl } = req.body;
 
     const task = await Task.create({
       title,
       description,
       assignedTo,
+      deadline,
+      fileUrl,
       status: 'Pending'
     });
 
     // Notify the assigned user
     const notification = await Notification.create({
       recipient: assignedTo,
-      message: `You have been assigned a new task: ${title}`,
+      message: `New Task Assigned: ${title}`,
       type: 'task',
-      link: '/tasks'
+      link: '/employee/tasks'
     });
 
     const io = req.app.get('io');
@@ -47,7 +51,6 @@ exports.getTasks = async (req, res) => {
   try {
     let query;
 
-    // Admin can see all tasks, employees see only their own
     if (req.user.role === 'admin') {
       if (req.query.assignedTo) {
          query = { assignedTo: req.query.assignedTo };
@@ -72,15 +75,19 @@ exports.getTasks = async (req, res) => {
   }
 };
 
-// @desc    Update task status
+// @desc    Update task status / Upload file
 // @route   PUT /api/tasks/:id/status
 // @access  Private
 exports.updateTaskStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, fileUrl } = req.body;
 
-    if (!['Pending', 'In Progress', 'Completed'].includes(status)) {
+    if (status && !['Pending', 'In Progress', 'Completed'].includes(status)) {
        return res.status(400).json({ success: false, message: 'Invalid status update' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid task id' });
     }
 
     let task = await Task.findById(req.params.id);
@@ -89,13 +96,33 @@ exports.updateTaskStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Task not found' });
     }
 
-    // Allow admin to update any task, or the assigned user to update their own task
     if (task.assignedTo.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Not authorized to update this task' });
+      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    task.status = status;
+    if (status) task.status = status;
+    if (fileUrl) task.fileUrl = fileUrl;
+    
     await task.save();
+
+    // If completed, notify admin
+    if (status === 'Completed') {
+      const admins = await User.find({ role: 'admin' });
+      const io = req.app.get('io');
+      const userSockets = req.app.get('userSockets');
+
+      for (const admin of admins) {
+        const notification = await Notification.create({
+          recipient: admin._id,
+          message: `${req.user.name} completed the task: ${task.title}`,
+          type: 'task',
+          link: '/admin/tasks'
+        });
+        
+        const adminSocketId = userSockets.get(admin._id.toString());
+        if (adminSocketId) io.to(adminSocketId).emit('newNotification', notification);
+      }
+    }
 
     res.status(200).json({
       success: true,

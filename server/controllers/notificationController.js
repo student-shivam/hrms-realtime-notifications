@@ -1,4 +1,5 @@
 const Notification = require('../models/Notification');
+const mongoose = require('mongoose');
 
 // @desc    Get all notifications for logged in user
 // @route   GET /api/notifications
@@ -21,7 +22,8 @@ exports.getNotifications = async (req, res) => {
       data: notifications
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Server Error' });
+    console.error('getNotifications error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -30,6 +32,10 @@ exports.getNotifications = async (req, res) => {
 // @access  Private
 exports.markAsRead = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid notification id' });
+    }
+
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, recipient: req.user._id },
       { isRead: true },
@@ -37,12 +43,13 @@ exports.markAsRead = async (req, res) => {
     );
 
     if (!notification) {
-      return res.status(404).json({ success: false, error: 'Notification not found' });
+      return res.status(404).json({ success: false, message: 'Notification not found' });
     }
 
     res.status(200).json({ success: true, data: notification });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Server Error' });
+    console.error('markAsRead error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -57,6 +64,7 @@ exports.markAllAsRead = async (req, res) => {
     );
     res.status(200).json({ success: true, data: {} });
   } catch (error) {
-    res.status(500).json({ success: false, error: 'Server Error' });
+    console.error('markAllAsRead error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
