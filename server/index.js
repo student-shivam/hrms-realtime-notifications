@@ -32,15 +32,34 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const app = express();
 const server = http.createServer(app);
 const PORT = Number(process.env.PORT) || 5001;
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    credentials: true
+const allowedOrigins = (process.env.CLIENT_URL || process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const isOriginAllowed = (origin) => {
+  if (!origin || !allowedOrigins.length) {
+    return true;
+  }
+
+  return allowedOrigins.includes(origin);
+};
+const corsOptions = {
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
+  credentials: true
+};
+
+const io = new Server(server, {
+  cors: corsOptions,
   transports: ['websocket', 'polling']
 });
 
-app.use(cors({ origin: '*', credentials: true }));
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

@@ -1,14 +1,29 @@
 import axios from 'axios';
 
-const DEFAULT_API_ORIGIN = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5001/api' : '/api');
+const trimTrailingSlash = (value) => value.replace(/\/$/, '');
+
+const getEnvValue = (...keys) => {
+  for (const key of keys) {
+    const value = import.meta.env[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return '';
+};
+
+const configuredApiOrigin = getEnvValue('VITE_API_URL', 'REACT_APP_API');
+const configuredSocketOrigin = getEnvValue('VITE_SOCKET_URL', 'REACT_APP_SOCKET_URL');
+const DEFAULT_API_ORIGIN = configuredApiOrigin || (import.meta.env.DEV ? 'http://localhost:5001/api' : '/api');
 
 const normalizeApiBaseUrl = (value) => {
   const rawValue = value ? value : DEFAULT_API_ORIGIN;
-  return rawValue.endsWith('/api') ? rawValue : `${rawValue.replace(/\/$/, '')}/api`;
+  return rawValue.endsWith('/api') ? rawValue : `${trimTrailingSlash(rawValue)}/api`;
 };
 
-export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_URL);
-export const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || API_BASE_URL.replace(/\/api$/, '')).replace(/\/$/, '');
+export const API_BASE_URL = normalizeApiBaseUrl(configuredApiOrigin);
+export const SOCKET_URL = trimTrailingSlash(configuredSocketOrigin || API_BASE_URL.replace(/\/api$/, ''));
 export const ASSET_BASE_URL = SOCKET_URL;
 
 export const getApiErrorMessage = (error, fallback = 'Something went wrong') => {
